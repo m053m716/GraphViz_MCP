@@ -11,7 +11,7 @@ Claude Code / Codex VS Code extension
 .venv\Scripts\python.exe server.py
         |
         v
-GraphViz dot.exe -> .dot source + .svg/.png/.pdf artifact
+GraphViz -> .dot source + bounded parent/inner .svg/.png/.pdf artifacts
 ```
 
 The target repository is always supplied as `project_dir`; it does not have to be this server repository. A `.dot` file is the editable source of truth. SVG is the default documentation artifact, PNG is available for compatibility, and PDF is available for publication workflows.
@@ -50,11 +50,13 @@ STDOUT is reserved for MCP protocol traffic. GraphViz output is written to reque
 
 The initialization `instructions` tell agents to use GraphViz for state machines, state transitions, flowcharts, directed dependency graphs, architecture/data-flow diagrams, decision flows, and similar graph-structured technical documentation. They also emphasize version-controlled `.dot` sources, SVG by default, managed Markdown references, repository conventions, and avoiding decorative or unrelated edits.
 
+Every graph image is limited to at most five visual rows, five visual columns, and therefore 25 nodes. The server inspects the coordinates computed by the selected GraphViz engine. If either dimension or the node capacity is exceeded, it spatially partitions the source into bounded inner views and renders a parent overview with one encapsulation node per inner view. SVG overview nodes link to their inner SVG images. If an overview would itself exceed 5x5, the server recursively adds bounded intermediate overview images. The original `.dot` remains the source of truth, and generated `.parent.dot`, `.inner-NNN.dot`, and, when needed, `.group-L-NNN.dot` files make the rendered hierarchy reviewable.
+
 ## MCP tools
 
 ### `graphviz_environment`
 
-Read-only; no arguments. Reports the actual `dot.exe` path, GraphViz version, supported formats, available engine paths, server working directory, and server repository path.
+Read-only; no arguments. Reports the actual `dot.exe` path, GraphViz version, supported formats, available engine paths, server working directory, server repository path, enforced row/column/node limits, and oversized-layout behavior.
 
 ### `graphviz_validate`
 
@@ -65,7 +67,7 @@ project_dir: string
 dot_path: string
 ```
 
-Returns `success`, `dot_path`, `errors`, `warnings`, and bounded `stderr`. The source must be an existing `.dot` file inside `project_dir`.
+Returns `success`, `dot_path`, `errors`, `warnings`, bounded `stderr`, and a `layout` object containing the computed row/column counts, limits, `layout_compliant`, and `requires_encapsulation`. The source must be an existing `.dot` file inside `project_dir`. An oversized but valid source still validates successfully because rendering can safely encapsulate it.
 
 ### `graphviz_render`
 
@@ -79,7 +81,7 @@ format: svg | png | pdf (default svg)
 engine: dot | neato | fdp | sfdp | circo | twopi (default dot)
 ```
 
-If `output_path` is omitted, the artifact is placed next to the source with the selected extension. The result includes absolute and project-relative output paths.
+If `output_path` is omitted, the root artifact is placed next to the source with the selected extension. A layout within 5x5 renders normally. An oversized layout automatically produces the bounded parent/inner hierarchy described above. The requested path always identifies the root parent image; related inner images use deterministic names beside it. The result includes `encapsulated`, the original and root layout summaries, and an `artifacts` manifest with every generated source/image pair and its row, column, and node counts. Encapsulated views use fixed positions through `neato` so GraphViz cannot expand them beyond the enforced grid.
 
 ### `graphviz_render_source`
 
@@ -94,7 +96,7 @@ format: svg | png | pdf (default svg)
 engine: allowed engine (default dot)
 ```
 
-The `.dot` source remains in the project after rendering.
+The caller-provided `.dot` source remains in the project after rendering. When encapsulation is required, the derived parent/inner `.dot` sources also remain in the project.
 
 ### `graphviz_publish_markdown`
 
@@ -118,21 +120,21 @@ The managed block identifies the source and uses a correct relative image link:
 <!-- /graphviz:docs/diagrams/controller-state.dot -->
 ```
 
-Repeated calls update the block rather than duplicating it. An `anchor` inserts the block after the matching line. Without an anchor, the block is appended only when the Markdown location is unambiguous.
+Repeated calls update the block rather than duplicating it. An `anchor` inserts the block after the matching line. Without an anchor, the block is appended only when the Markdown location is unambiguous. For an encapsulated diagram, the managed block references the root parent image; its encapsulation nodes lead to the separately rendered inner images when the output format supports links.
 
 ### `graphviz_sync`
 
-Convenience operation. With `markdown_path`, it refreshes the managed Markdown block; without it, it validates and renders the source.
+Convenience operation. With `markdown_path`, it refreshes the managed Markdown block; without it, it validates and renders the source. The same 5x5 enforcement and automatic hierarchy apply in both cases.
 
 ## Security and path behavior
 
-All caller-provided paths are resolved and must remain inside the explicit `project_dir`. Existing symlinks that resolve outside the project are rejected. Output cannot overwrite the `.dot` source. Only the six known GraphViz engines and three expected output formats are accepted. Subprocesses use argument arrays, `shell=False`, `stdin=DEVNULL`, bounded timeouts, and bounded diagnostics. No caller-supplied executable, shell argument, recursive delete, or arbitrary command execution is available.
+All caller-provided paths are resolved and must remain inside the explicit `project_dir`. Existing symlinks that resolve outside the project are rejected. Output cannot overwrite the `.dot` source. Generated hierarchy sources remain beside the original source, while hierarchy images remain beside the requested root image; all remain inside the project. Only the six known GraphViz engines and three expected output formats are accepted. Subprocesses use argument arrays, `shell=False`, `stdin=DEVNULL`, bounded timeouts, and bounded diagnostics. No caller-supplied executable, shell argument, recursive delete, or arbitrary command execution is available.
 
 Write tools are marked with MCP write/idempotent annotations where supported; validation and environment inspection are marked read-only.
 
 ## Tests
 
-The fixtures include a labeled controller state machine (`Idle`, `Connecting`, `Connected`, `Fault`, `Retrying`), a decision flowchart with a diamond and branches, and a Markdown publish fixture. The suite covers executable/version detection, valid and invalid DOT, SVG/PNG rendering, missing and unsafe paths, invalid formats/engines, cross-project operations, relative links, managed-block creation/idempotence, and an actual MCP client/server STDIO session.
+The fixtures include a labeled controller state machine (`Idle`, `Connecting`, `Connected`, `Fault`, `Retrying`), a decision flowchart with a diamond and branches, and a Markdown publish fixture. The suite covers executable/version detection, valid and invalid DOT, SVG/PNG rendering, the exact 5-column boundary, automatic encapsulation of over-wide and over-tall layouts, parent-to-inner SVG links, per-artifact limits, missing and unsafe paths, invalid formats/engines, cross-project operations, relative links, managed-block creation/idempotence, and an actual MCP client/server STDIO session.
 
 Run the complete suite:
 
@@ -164,10 +166,10 @@ Codex must be restarted or its MCP settings reloaded before the new server appea
 
 ```text
 1. Choose the target repository and its existing docs/figure convention.
-2. Create or update docs/diagrams/controller-state.dot.
-3. Call graphviz_validate with the target project_dir.
-4. Call graphviz_publish_markdown with the relevant Markdown file.
-5. Review both the .dot source and generated SVG in version control.
+2. Create or update docs/diagrams/controller-state.dot without manually cramming more than 5x5 nodes into one view.
+3. Call graphviz_validate with the target project_dir and inspect `layout.requires_encapsulation`.
+4. Call graphviz_publish_markdown with the relevant Markdown file; it creates parent/inner views when required.
+5. Review the source, generated hierarchy `.dot` files, and SVG artifacts in version control.
 ```
 
 Example request:

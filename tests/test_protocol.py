@@ -23,6 +23,7 @@ async def _protocol_smoke() -> None:
             initialized = await session.initialize()
             assert initialized.serverInfo.name == "graphviz"
             assert initialized.instructions.startswith("Use GraphViz for state machines")
+            assert "Never put more than five rows or five columns" in initialized.instructions
             tools = await session.list_tools()
             names = {tool.name for tool in tools.tools}
             assert names == {
@@ -35,6 +36,9 @@ async def _protocol_smoke() -> None:
             }
             environment = _structured(await session.call_tool("graphviz_environment", {}))
             assert environment["success"] is True
+            assert environment["maximum_layout_rows"] == 5
+            assert environment["maximum_layout_columns"] == 5
+            assert environment["maximum_nodes_per_image"] == 25
 
             with TemporaryDirectory() as temp:
                 project = Path(temp)
