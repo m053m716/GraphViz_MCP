@@ -1,0 +1,12 @@
+digraph ControllerState {
+    rankdir=LR;
+    node [shape=ellipse, style=filled, fillcolor="#eef4ff"];
+    Idle -> Connecting [label="connect()"];
+    Connecting -> Connected [label="handshake ok"];
+    Connecting -> Fault [label="timeout"];
+    Connected -> Idle [label="disconnect()"];
+    Connected -> Fault [label="transport error"];
+    Fault -> Retrying [label="retry budget remains"];
+    Retrying -> Connecting [label="backoff elapsed"];
+    Retrying -> Fault [label="retry exhausted"];
+}

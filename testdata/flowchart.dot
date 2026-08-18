@@ -1,0 +1,14 @@
+digraph DecisionFlow {
+    rankdir=TB;
+    node [fontname="Arial"];
+    start [shape=oval, label="Request received"];
+    ready [shape=diamond, label="Ready?"];
+    execute [shape=box, label="Execute operation"];
+    wait [shape=box, label="Wait for dependency"];
+    done [shape=oval, label="Complete"];
+    start -> ready;
+    ready -> execute [label="yes"];
+    ready -> wait [label="no"];
+    wait -> ready [label="dependency available"];
+    execute -> done;
+}

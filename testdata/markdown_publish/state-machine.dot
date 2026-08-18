@@ -1,0 +1,8 @@
+digraph PublishState {
+    rankdir=LR;
+    Idle -> Connecting [label="connect"];
+    Connecting -> Connected [label="ready"];
+    Connected -> Fault [label="error"];
+    Fault -> Retrying [label="retry"];
+    Retrying -> Idle [label="recovered"];
+}

@@ -1,4 +1,9 @@
 .venv/
 __pycache__/
 .pytest_cache/
-*.pyc
+*.py[cod]
+*.egg-info/
+
+# Local logs and temporary renders; intentional diagram fixtures remain trackable.
+*.log
+*.tmp

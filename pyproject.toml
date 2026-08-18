@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "graphviz-mcp"
+version = "0.1.0"
+description = "Local stdio MCP server for safe GraphViz rendering and Markdown publishing"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=1.29.0,<2",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.setuptools]
+py-modules = ["server"]
