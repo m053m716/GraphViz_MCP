@@ -46,6 +46,86 @@ C:\MyRepos\Python\GraphViz_MCP\.venv\Scripts\python.exe
 
 STDOUT is reserved for MCP protocol traffic. GraphViz output is written to requested files and bounded diagnostics are returned in tool results; the server does not print debugging text to STDOUT.
 
+## Console scripts
+
+Installing the package (`pip install -e .`) exposes three console scripts under
+`[project.scripts]`. They reconcile every configuration change in place: existing unrelated
+settings, servers, comments, and formatting are preserved; the `graphviz` entry is upserted
+so repeated runs never create duplicates; and a timestamped `.bak` backup is written before
+any file changes.
+
+### `graphviz-mcp`
+
+Runs the stdio MCP server (equivalent to launching `server.py`). MCP clients normally invoke
+the interpreter and `server.py` directly, but this script is a stable, PATH-resolvable entry
+point.
+
+```powershell
+# Run the server over stdio (a client normally launches this for you).
+.venv\Scripts\graphviz-mcp.exe
+```
+
+### `graphviz-mcp-vscode [project_dir]`
+
+Writes the repository-local artifacts a local VS Code repository needs (defaults to the
+current directory):
+
+- `.mcp.json` — Claude Code project-scoped `mcpServers.graphviz` stdio entry.
+- `.codex/config.toml` — Codex project-scoped `[mcp_servers.graphviz]` table with `command`,
+  `args`, `cwd`, `startup_timeout_sec`, `tool_timeout_sec`, and `enabled`.
+- `.claude/rules/graphviz.md` — concise Claude Code rule.
+- `AGENTS.md` — a marker-delimited GraphViz guidance section (created or upserted).
+- `README.md` — a marker-delimited GraphViz usage section documenting the typical workflows
+  and available tools (created or upserted).
+
+The generated stdio command targets the adjacent `.venv` interpreter when present, otherwise
+the interpreter running the script; `args` points at this repository's `server.py`.
+
+```powershell
+# Configure the repository in the current directory.
+.venv\Scripts\graphviz-mcp-vscode.exe
+
+# Or point at a specific repository.
+.venv\Scripts\graphviz-mcp-vscode.exe C:\MyRepos\SomeProject
+```
+
+### `graphviz-mcp-install`
+
+Registers the server in the **global** user configuration:
+
+- `~/.claude.json` — top-level `mcpServers.graphviz`.
+- `~/.claude/rules/graphviz.md` — concise global rule.
+- `~/.codex/config.toml` — `[mcp_servers.graphviz]` table.
+- `~/.codex/AGENTS.md` — marker-delimited GraphViz guidance section.
+
+Before writing configuration it detects the GraphViz `dot` executable via `PATH`,
+`GRAPHVIZ_DOT`, and common install locations (enumerated drive letters and `Program Files`
+layouts on Windows; standard prefixes on POSIX). It also reads `dot -V` and compares it
+against the minimum verified GraphViz version. If `dot` is missing, or present but older than
+that minimum, it prints the exact platform command (winget/brew/apt/dnf/pacman) — an install
+command when missing, an upgrade command when out of date — and only executes it when re-run
+with `--install-graphviz`. Use `--skip-graphviz-check` to write configuration without touching
+GraphViz detection.
+
+```powershell
+# Register globally; report (but do not run) any needed GraphViz install/upgrade.
+.venv\Scripts\graphviz-mcp-install.exe
+
+# Register globally and install GraphViz if missing, or upgrade it if it is too old.
+.venv\Scripts\graphviz-mcp-install.exe --install-graphviz
+
+# Register globally and skip GraphViz detection entirely.
+.venv\Scripts\graphviz-mcp-install.exe --skip-graphviz-check
+```
+
+On POSIX shells the scripts are on `PATH` after `pip install -e .` (or use
+`.venv/bin/graphviz-mcp-install`):
+
+```bash
+graphviz-mcp-vscode ./my-project
+graphviz-mcp-install --install-graphviz
+```
+
 ## Server instructions
 
 The initialization `instructions` tell agents to use GraphViz for state machines, state transitions, flowcharts, directed dependency graphs, architecture/data-flow diagrams, decision flows, and similar graph-structured technical documentation. They also emphasize version-controlled `.dot` sources, SVG by default, managed Markdown references, repository conventions, and avoiding decorative or unrelated edits.
@@ -197,3 +277,42 @@ Individual repositories do not need copies of GraphViz_MCP. They only need their
 - If Markdown insertion fails, supply an exact heading or anchor so the tool has an unambiguous insertion point.
 - If a client does not list the server, validate the JSON/TOML, then reload the Claude Code or Codex VS Code extension/session. This implementation does not claim extension-level connectivity without that UI check.
 - The server process is intentionally client-managed; do not start a persistent terminal or HTTP process.
+
+<!-- handoff-mcp:begin (managed by `handoff-mcp init --vscode`) -->
+## Handoff MCP — session memory for agents
+
+This repo has the `handoff` MCP server configured (see `.mcp.json` /
+`.codex/config.toml`). It is a durable, project-scoped place to leave
+breadcrumbs between sessions. Use it instead of re-deriving context.
+
+**At the start of a session**, call `handoff_list` to reload where prior work
+stopped and what to do next, and `todo_list` for outstanding next steps. This is
+cheaper and more reliable than re-reading the whole transcript.
+
+**While working**, when you find something that must be done but is not the
+current focus, call `todo_add` rather than holding it in the conversation.
+
+**When context gets heavy** (stale greps, large logs, finished sub-tasks pile
+up), call `context_report`, then `context_compact` — it returns a
+summarise-then-handoff procedure and can persist the summary as a handoff in one
+call.
+
+**At the end of a work chunk**, call `handoff_add` with a summary, next steps,
+and the few key facts (file paths, decisions, gotchas) the next worker needs. A
+fresh session can then resume from `handoff_list` alone.
+
+**Close the loop** with `todo_update` (done/dropped) and `handoff_resolve` so
+the open lists stay a true worklist.
+
+| Tool | Use it to |
+| --- | --- |
+| `handoff_list` | Reload breadcrumbs at session start. |
+| `handoff_add` | Record where you stopped and what is next. |
+| `handoff_resolve` | Mark a handoff done. |
+| `todo_add` / `todo_list` / `todo_update` | Track next-step TODOs. |
+| `project_status` | Counts of open todos and handoffs. |
+| `context_report` / `context_compact` | Notice and shrink a bloated context window. |
+
+Every tool is scoped to this project only; there is no way to reach another
+project's data. Full reference: `docs/TOOL_GUIDE.md`.
+<!-- handoff-mcp:end -->

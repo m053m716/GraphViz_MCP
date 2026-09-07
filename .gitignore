@@ -7,3 +7,11 @@ __pycache__/
 # Local logs and temporary renders; intentional diagram fixtures remain trackable.
 *.log
 *.tmp
+
+# Timestamped backups written before a config file is reconciled in place.
+*.bak
+
+# Agent-specific files for code generation and AI-assisted development.
+.codex
+.claude
+.mcp.json

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "graphviz-mcp"
-version = "0.1.0"
+version = "0.2.1"
 description = "Local stdio MCP server for safe GraphViz rendering and Markdown publishing"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -17,9 +17,14 @@ test = [
     "pytest>=8.0",
 ]
 
+[project.scripts]
+graphviz-mcp = "server:main"
+graphviz-mcp-vscode = "graphviz_mcp_setup:vscode_main"
+graphviz-mcp-install = "graphviz_mcp_setup:install_main"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
 
 [tool.setuptools]
-py-modules = ["server"]
+py-modules = ["server", "graphviz_mcp_setup"]
