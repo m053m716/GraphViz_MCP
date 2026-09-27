@@ -1,0 +1,21 @@
+digraph HTTP {
+  graph [rankdir=TB, bgcolor="white"];
+  node [shape=box, style="rounded", fontname="Arial"];
+  discord [label="Discord events"];
+  browser [label="Activity browser"];
+  machine [label="Trusted service client"];
+  cloud [label="Cloudflare Tunnel\nAccess Service Auth on /api/*"];
+  python [label="activity/server.py\n127.0.0.1:8080"];
+  frontend [label="/\nActivity shell"];
+  health [label="/healthz\nPublic health"];
+  hooks [label="/hooks/v1/discord/events\nEd25519 verification"];
+  api [label="/api/v1/health\nService health"];
+  discord -> cloud;
+  browser -> cloud;
+  machine -> cloud;
+  cloud -> python;
+  python -> frontend;
+  python -> health;
+  python -> hooks;
+  python -> api;
+}

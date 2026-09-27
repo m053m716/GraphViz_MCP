@@ -78,13 +78,13 @@ def test_render_source_preserves_dot(tmp_path: Path) -> None:
 def test_oversized_layout_is_rendered_as_parent_and_inner_images(
     tmp_path: Path, rankdir: str, axis: str
 ) -> None:
-    source = f"digraph Wide {{ rankdir={rankdir}; n1 -> n2 -> n3 -> n4 -> n5 -> n6; }}"
+    source = f"digraph Wide {{ rankdir={rankdir}; " + " -> ".join(f"n{i}" for i in range(1, 31)) + "; }"
     dot = tmp_path / "wide.dot"
     dot.write_text(source, encoding="utf-8")
 
     validation = server.graphviz_validate_impl(str(tmp_path), "wide.dot")
     assert validation["success"] is True, validation
-    assert validation["layout"][axis] == 6
+    assert validation["layout"][axis] == 30
     assert validation["layout"]["requires_encapsulation"] is True
 
     result = server.graphviz_render_impl(str(tmp_path), "wide.dot")
@@ -125,10 +125,103 @@ def test_five_by_five_boundary_does_not_encapsulate(tmp_path: Path) -> None:
     assert result["layout"]["layout_compliant"] is True
 
 
+def test_http_boundary_stays_one_meaningful_graph(tmp_path: Path) -> None:
+    source = tmp_path / "http-boundary.dot"
+    source.write_text((ROOT / "testdata/http-boundary.dot").read_text(encoding="utf-8"), encoding="utf-8")
+    result = server.graphviz_render_impl(str(tmp_path), source.name)
+    assert result["success"], result
+    assert not result["encapsulated"]
+    assert result["layout"]["rows"] == 4
+    assert result["layout"]["columns"] == 4
+    assert result["layout"]["node_count"] == 9
+    svg = Path(result["output_path"]).read_text(encoding="utf-8")
+    assert "Trusted service client" in svg and "Service health" in svg
+    assert "machine&#45;&gt;cloud" in svg and "python&#45;&gt;api" in svg
+    assert len(result["artifacts"]) == 1
+
+
+@pytest.mark.parametrize("format", ["svg", "png", "pdf"])
+def test_small_long_graph_reflows_without_folders(tmp_path: Path, format: str) -> None:
+    source = tmp_path / "long.dot"
+    original = 'digraph { a -> b -> c -> d -> e -> f [label="carry"]; }'
+    source.write_text(original, encoding="utf-8")
+    validation = server.graphviz_validate_impl(str(tmp_path), source.name)
+    assert validation["layout"]["requires_bounded_layout"]
+    assert not validation["layout"]["requires_encapsulation"]
+    result = server.graphviz_render_impl(str(tmp_path), source.name, format=format)
+    assert result["success"], result
+    assert result["reflowed"] and not result["encapsulated"]
+    assert len(result["artifacts"]) == 1
+    assert result["layout"]["node_count"] == 6
+    assert result["layout"]["layout_compliant"]
+    generated = Path(result["artifacts"][0]["dot_path"]).read_text(encoding="utf-8")
+    assert generated.count(" -> ") == 5 and 'label="carry"' in generated
+    assert source.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.parametrize("hint", ["cluster", "mcp_group"])
+def test_semantic_panels_preserve_labeled_boundary_edges(tmp_path: Path, hint: str) -> None:
+    parts = ["digraph {"]
+    for group, title in enumerate(["Ingress", "Storage"]):
+        declarations = " ".join(f'n{i} [mcp_group="{title}"];' if hint == "mcp_group" else f"n{i};"
+                                for i in range(group * 15, (group + 1) * 15))
+        parts.append(f'subgraph cluster_{group} {{ label="{title}"; {declarations} }}' if hint == "cluster" else declarations)
+    parts.append(" -> ".join(f"n{i}" for i in range(30)) + '; n2 -> n28 [label="persist", color="red"]; }')
+    (tmp_path / "semantic.dot").write_text("\n".join(parts), encoding="utf-8")
+    result = server.graphviz_render_impl(str(tmp_path), "semantic.dot")
+    assert result["success"], result
+    panels = [a for a in result["artifacts"] if a["kind"] == "inner"]
+    assert len(panels) == 2
+    assert {a["label"].splitlines()[0] for a in panels} == {"Ingress", "Storage"}
+    assert {frozenset(a["owned_nodes"]) for a in panels} == {
+        frozenset(f"n{i}" for i in range(15)), frozenset(f"n{i}" for i in range(15, 30))}
+    for panel in panels:
+        text = Path(panel["dot_path"]).read_text(encoding="utf-8")
+        assert 'style="dashed"' in text and 'color="red"' in text
+        assert "persist" in text and "n2 → n28" in text
+        assert panel["node_count"] == 16  # fifteen owned nodes and one boundary portal
+        assert any(e["tail"] == "n2" and e["head"] == "n28" and e["label"] == "persist"
+                   for e in panel["boundary_connections"])
+    parent = Path(result["parent_dot_path"]).read_text(encoding="utf-8")
+    assert "Ingress" in parent and "Storage" in parent and "persist" in parent
+    assert 'shape="folder"' not in parent
+
+
+def test_hub_panels_keep_context_and_never_exceed_capacity(tmp_path: Path) -> None:
+    source = 'digraph { hub [label="Gateway"]; ' + " ".join(f"hub -> n{i};" for i in range(30)) + " }"
+    (tmp_path / "hub.dot").write_text(source, encoding="utf-8")
+    result = server.graphviz_render_impl(str(tmp_path), "hub.dot")
+    assert result["success"], result
+    panels = [a for a in result["artifacts"] if a["kind"] == "inner"]
+    assert len(panels) == 2
+    owned = [name for a in panels for name in a["owned_nodes"]]
+    assert len(owned) == len(set(owned)) == 31
+    for panel in panels:
+        text = Path(panel["dot_path"]).read_text(encoding="utf-8")
+        assert "Gateway" in text and " -> " in text
+        assert panel["node_count"] <= 25
+
+
+def test_recursive_panels_and_boundary_overflow(tmp_path: Path) -> None:
+    # 27 semantic groups force a second overview level; hub sees >5 panels.
+    declarations = 'hub [mcp_group="Gateway"]; ' + " ".join(
+        f'n{i} [mcp_group="Service {i}"]; hub -> n{i} [label="route {i}"];' for i in range(26))
+    (tmp_path / "recursive.dot").write_text("digraph { " + declarations + " }", encoding="utf-8")
+    result = server.graphviz_render_impl(str(tmp_path), "recursive.dot")
+    assert result["success"], result
+    assert any(a["kind"] == "group" for a in result["artifacts"])
+    hub = next(a for a in result["artifacts"] if a.get("owned_nodes") == ["hub"])
+    assert len(hub["boundary_connections"]) == 26
+    assert hub["node_count"] == 6
+    for artifact in result["artifacts"]:
+        inspected = server._inspect_layout(Path(artifact["dot_path"]), "neato", fixed_positions=True)
+        assert inspected["success"] and inspected["layout_compliant"]
+
+
 def test_undirected_graph_remains_undirected_when_encapsulated(tmp_path: Path) -> None:
     dot = tmp_path / "network.dot"
     dot.write_text(
-        "graph Network { rankdir=LR; n1 -- n2 -- n3 -- n4 -- n5 -- n6; }",
+        "graph Network { rankdir=LR; " + " -- ".join(f"n{i}" for i in range(1, 31)) + "; }",
         encoding="utf-8",
     )
     result = server.graphviz_render_impl(str(tmp_path), "network.dot")
@@ -203,7 +296,7 @@ def test_markdown_relative_link_and_idempotent_update(tmp_path: Path) -> None:
 
 def test_markdown_publish_exposes_encapsulated_artifacts(tmp_path: Path) -> None:
     (tmp_path / "wide.dot").write_text(
-        "digraph Wide { rankdir=LR; n1 -> n2 -> n3 -> n4 -> n5 -> n6; }",
+        "digraph Wide { rankdir=LR; " + " -> ".join(f"n{i}" for i in range(1, 31)) + "; }",
         encoding="utf-8",
     )
     readme = tmp_path / "README.md"
@@ -222,6 +315,10 @@ def test_markdown_publish_exposes_encapsulated_artifacts(tmp_path: Path) -> None
     assert "![Bounded wide graph](wide.svg)" in readme.read_text(encoding="utf-8")
     assert (tmp_path / "wide.inner-001.svg").is_file()
     assert (tmp_path / "wide.inner-002.svg").is_file()
+    assert "![Detail panel 1](wide.inner-001.svg)" in readme.read_text(encoding="utf-8")
+    again = server.graphviz_publish_markdown_impl(str(tmp_path), "wide.dot", "README.md")
+    assert again["success"]
+    assert readme.read_text(encoding="utf-8").count("![Detail panel 1]") == 1
 
 
 def test_markdown_publish_fixture_twice() -> None:

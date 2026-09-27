@@ -30,7 +30,7 @@ INSTRUCTIONS = """Use GraphViz for state machines, state-transition diagrams, fl
 
 When an existing task creates or materially changes a state/flow diagram, prefer these GraphViz tools over hand-drawn ASCII diagrams or an unmaintainable raster-only diagram. Preserve repository conventions when a project explicitly mandates another diagram system, do not create diagrams merely for decoration, and do not rewrite unrelated Markdown. Treat .dot as the source and SVG/PNG/PDF as generated artifacts; favor SVG unless compatibility requires PNG. Keep both source and artifact when repository policy permits.
 
-Never put more than five rows or five columns of nodes, or more than 25 nodes total, in one graph image. The tools inspect the computed GraphViz layout and enforce these limits. When a source needs a larger layout, render a parent overview whose encapsulation nodes link to separately rendered inner graphs; recursively encapsulate oversized overviews. Keep every parent and inner image within the same five-by-five limit, and retain the generated parent/inner .dot files beside the source so the hierarchy is reviewable.
+Never put more than five rows or five columns of nodes, or more than 25 nodes total, in one graph image. Author the complete meaningful graph first; do not pre-split it by drawing coordinates or replace components with anonymous folders. The tools count dot ranks and their occupancy, reflow small oversized layouts into one bounded image, and partition larger graphs by connectivity. Supply labeled cluster subgraphs or node mcp_group attributes to express subsystem or workflow boundaries. Each detail panel must explain a relationship: retain real node names, edge labels, and incoming/outgoing boundary context. Overview nodes summarize their contents and link to detail panels. Inspect the artifacts and boundary_connections in tool results; revise grouping if a panel does not answer a useful question. Keep each view within the same five-by-five limit including boundary nodes, and retain generated .bounded.dot, parent/inner .dot sources and images. Publish/sync includes detail images in Markdown because SVG links often do not work in embedded images.
 
 All filesystem-writing tools require an explicit project directory (or CLAUDE_PROJECT_DIR when the argument is intentionally empty), keep paths inside that project, and use the GraphViz executable discovered from PATH. The server is stdio-only and never starts a daemon.
 """
@@ -176,7 +176,8 @@ def _inspect_layout(dot: Path, engine: str, *, fixed_positions: bool = False) ->
         )
     try:
         model = json.loads(result.stdout)
-        raw_nodes = model.get("objects", [])
+        # GraphViz includes subgraphs/clusters in objects; they are not nodes.
+        raw_nodes = [item for item in model.get("objects", []) if "pos" in item]
         positions = [_parse_position(node["pos"]) for node in raw_nodes]
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         return _failure(f"could not inspect GraphViz JSON layout: {exc}", dot_path=str(dot))
@@ -202,6 +203,24 @@ def _inspect_layout(dot: Path, engine: str, *, fixed_positions: bool = False) ->
     ]
     rows = len(y_levels)
     columns = len(x_levels)
+    # For dot, ranks are the visual rows (TB/BT) or columns (LR/RL).
+    # Counting every off-centre coordinate on the other axis splits small trees.
+    if engine == "dot" and not fixed_positions:
+        if model.get("rankdir", "TB") in {"LR", "RL"}:
+            rows = max((sum(node.column == i for node in nodes) for i in range(columns)), default=0)
+        else:
+            columns = max((sum(node.row == i for node in nodes) for i in range(rows)), default=0)
+    memberships: dict[int, tuple[int, str]] = {}
+    for item in model.get("objects", []):
+        if "pos" in item or not item.get("name", "").startswith("cluster"):
+            continue
+        members = item.get("nodes", [])
+        for member in members:
+            if member not in memberships or len(members) < memberships[member][0]:
+                memberships[member] = (len(members), str(item.get("label", item["name"])))
+    for node in nodes:
+        if node.index in memberships:
+            node.attributes.setdefault("mcp_group", memberships[node.index][1])
     compliant = (
         rows <= MAX_LAYOUT_ROWS
         and columns <= MAX_LAYOUT_COLUMNS
@@ -217,7 +236,8 @@ def _inspect_layout(dot: Path, engine: str, *, fixed_positions: bool = False) ->
         "max_columns": MAX_LAYOUT_COLUMNS,
         "max_nodes": MAX_LAYOUT_NODES,
         "layout_compliant": compliant,
-        "requires_encapsulation": not compliant,
+        "requires_bounded_layout": not compliant,
+        "requires_encapsulation": len(nodes) > MAX_LAYOUT_NODES,
         "nodes": nodes,
         "edges": edges,
         "stderr": _diagnostics(result.stderr),
@@ -292,7 +312,10 @@ def _dot_attributes(attributes: dict[str, Any], allowed: set[str]) -> str:
 
 
 def _grid_position(index: int) -> tuple[int, int]:
-    return index // MAX_LAYOUT_COLUMNS, index % MAX_LAYOUT_COLUMNS
+    row, column = divmod(index, MAX_LAYOUT_COLUMNS)
+    # Fold sequential flows at the end of each row instead of drawing a long
+    # diagonal back across the preceding row.
+    return row, MAX_LAYOUT_COLUMNS - 1 - column if row % 2 else column
 
 
 def _write_fixed_grid_dot(
@@ -313,10 +336,21 @@ def _write_fixed_grid_dot(
         "  graph [layout=neato, overlap=false, splines=true, labelloc=t, "
         f"label={_dot_quote(title)}];",
     ]
+    # Dimensions in GraphViz JSON are inches; fixed neato positions are points.
+    # Reserve enough space for long labels, including generated portal labels.
+    def extent(attrs: dict[str, Any], axis: str) -> float:
+        label = str(attrs.get("label", "")).replace(r"\n", "\n")
+        lines = label.splitlines() or [""]
+        font = float(attrs.get("fontsize", 14))
+        estimate = max(map(len, lines)) * font * 0.65 if axis == "width" else len(lines) * font * 1.3
+        return max(float(attrs.get(axis, 0)) * 72, estimate + 24)
+
+    x_step = max((extent(attrs, "width") for _, attrs in node_specs), default=132) + 60
+    y_step = max((extent(attrs, "height") for _, attrs in node_specs), default=52) + 60
     for index, (name, attributes) in enumerate(node_specs):
         row, column = _grid_position(index)
         positioned = dict(attributes)
-        positioned["pos"] = f"{column * 180},{-row * 100}!"
+        positioned["pos"] = f"{column * x_step},{-row * y_step}!"
         positioned["pin"] = "true"
         allowed = set(_NODE_ATTRIBUTES) | {"pos", "pin", "URL", "target", "tooltip"}
         lines.append(f"  {_dot_quote(name)}{_dot_attributes(positioned, allowed)};")
@@ -396,7 +430,9 @@ def _validate_dot(root: Path, dot: Path) -> dict[str, Any]:
 
 
 def _overview_specs(
-    units: list[_HierarchyUnit], edges: list[_LayoutEdge]
+    units: list[_HierarchyUnit], edges: list[_LayoutEdge],
+    node_by_index: dict[int, _LayoutNode],
+    *, directed: bool = True,
 ) -> tuple[list[tuple[str, dict[str, Any]]], list[tuple[str, str, dict[str, Any]]]]:
     owner = {
         node_index: unit_index
@@ -410,7 +446,7 @@ def _overview_specs(
                 unit.key,
                 {
                     "label": unit.label,
-                    "shape": "folder",
+                    "shape": "box",
                     "style": "filled",
                     "fillcolor": "#eef4ff",
                     "URL": unit.output_path.name,
@@ -419,21 +455,105 @@ def _overview_specs(
                 },
             )
         )
-    counts: dict[tuple[int, int], int] = defaultdict(int)
+    connections: dict[tuple[int, int], list[str]] = defaultdict(list)
     for edge in edges:
         tail_owner = owner.get(edge.tail)
         head_owner = owner.get(edge.head)
         if tail_owner is not None and head_owner is not None and tail_owner != head_owner:
-            counts[(tail_owner, head_owner)] += 1
+            separator = " → " if directed else " — "
+            detail = str(edge.attributes.get("label") or
+                         _node_label(node_by_index[edge.tail]) + separator + _node_label(node_by_index[edge.head]))
+            if not directed and tail_owner > head_owner:
+                tail_owner, head_owner = head_owner, tail_owner
+            connections[(tail_owner, head_owner)].append(detail)
     edge_specs = [
         (
             units[tail].key,
             units[head].key,
-            {"label": f"{count} connection" + ("s" if count != 1 else "")},
+            {"label": _summary(details)},
         )
-        for (tail, head), count in sorted(counts.items())
+        for (tail, head), details in sorted(connections.items())
     ]
     return node_specs, edge_specs
+
+
+def _node_label(node: _LayoutNode) -> str:
+    label = str(node.attributes.get("label", node.name))
+    return label.replace(r"\N", node.name).replace(r"\n", " / ").replace("\n", " / ")
+
+
+def _summary(labels: list[str]) -> str:
+    unique = list(dict.fromkeys(labels))
+    return "\n".join(unique[:3]) + (f"\n… +{len(unique) - 3} more" if len(unique) > 3 else "")
+
+
+def _partition_nodes(nodes: list[_LayoutNode], edges: list[_LayoutEdge]) -> list[list[_LayoutNode]]:
+    """Deterministic connectivity heuristic; semantic groups constrain growth.
+
+    Keep twenty owned nodes at most, reserving five slots for boundary context.
+    Siblings with a shared neighbour may join a panel, but unrelated components
+    do not get mixed merely because their drawing coordinates are nearby.
+    """
+    by_index = {node.index: node for node in nodes}
+    adjacent: dict[int, set[int]] = {node.index: set() for node in nodes}
+    for edge in edges:
+        if edge.tail != edge.head:
+            adjacent[edge.tail].add(edge.head)
+            adjacent[edge.head].add(edge.tail)
+    remaining = set(by_index)
+    groups = []
+    while remaining:
+        seed = min(remaining, key=lambda i: (-len(adjacent[i]), i))
+        hint = by_index[seed].attributes.get("mcp_group", "")
+        selected = {seed}
+        remaining.remove(seed)
+        while len(selected) < MAX_LAYOUT_NODES - 5:
+            neighbours = set().union(*(adjacent[i] for i in selected))
+            candidates = [i for i in remaining
+                          if by_index[i].attributes.get("mcp_group", "") == hint
+                          and (adjacent[i] & selected or adjacent[i] & neighbours
+                               or (not neighbours and not adjacent[i]))]
+            if not candidates:
+                break
+            chosen = min(candidates, key=lambda i: (-len(adjacent[i] & selected),
+                                                    -len(adjacent[i] & neighbours), i))
+            selected.add(chosen)
+            remaining.remove(chosen)
+        groups.append(sorted((by_index[i] for i in selected), key=lambda n: (n.row, n.column, n.index)))
+    return groups
+
+
+def _panel_label(nodes: list[_LayoutNode]) -> str:
+    hints = list(dict.fromkeys(str(n.attributes["mcp_group"]) for n in nodes if n.attributes.get("mcp_group")))
+    contents = _summary([_node_label(n) for n in nodes])
+    # A subsystem may span several panels. Show representative members as well
+    # as its name so the overview never becomes identical subsystem boxes.
+    return (_summary(hints) + "\n" if hints else "") + contents
+
+
+def _render_bounded(root: Path, dot: Path, output: Path, format: str,
+                    engine: str, layout: dict[str, Any]) -> dict[str, Any]:
+    """Small but long layouts need reflow, not a one-folder hierarchy."""
+    source = dot.with_name(f"{dot.stem}.bounded.dot")
+    nodes = sorted(layout["nodes"], key=lambda n: (n.row, n.column, n.index))
+    names = {n.index: n.name for n in nodes}
+    _write_fixed_grid_dot(source, dot.stem, dot.stem,
+                         [(n.name, n.attributes) for n in nodes],
+                         [(names[e.tail], names[e.head], e.attributes) for e in layout["edges"]],
+                         directed=layout["directed"])
+    rendered = _render_fixed_grid(source, output, format)
+    if not rendered["success"]:
+        return rendered
+    return {
+        "success": True, "dot_path": str(dot), "source_path": str(dot),
+        "output_path": str(output), "project_relative_output_path": output.relative_to(root).as_posix(),
+        "format": format, "engine": "neato", "requested_engine": engine,
+        "encapsulated": False, "reflowed": True, "original_layout": _public_layout(layout),
+        "layout": rendered["layout"], "stderr": rendered["stderr"],
+        "artifacts": [{"kind": "bounded", "dot_path": str(source), "output_path": str(output),
+                       "project_relative_output_path": output.relative_to(root).as_posix(),
+                       **{key: rendered["layout"][key] for key in ("rows", "columns", "node_count")}}],
+    }
 
 
 def _render_encapsulated(
@@ -447,19 +567,8 @@ def _render_encapsulated(
     nodes: list[_LayoutNode] = layout["nodes"]
     edges: list[_LayoutEdge] = layout["edges"]
     node_by_index = {node.index: node for node in nodes}
-    tiled: dict[tuple[int, int], list[_LayoutNode]] = defaultdict(list)
-    for node in nodes:
-        tiled[(node.row // MAX_LAYOUT_ROWS, node.column // MAX_LAYOUT_COLUMNS)].append(node)
-
-    leaf_groups: list[list[_LayoutNode]] = []
-    for tile_key in sorted(tiled):
-        tile_nodes = sorted(
-            tiled[tile_key], key=lambda node: (node.row, node.column, node.name)
-        )
-        leaf_groups.extend(
-            tile_nodes[index : index + MAX_LAYOUT_NODES]
-            for index in range(0, len(tile_nodes), MAX_LAYOUT_NODES)
-        )
+    leaf_groups = _partition_nodes(nodes, edges)
+    owner = {node.index: number for number, group in enumerate(leaf_groups, start=1) for node in group}
 
     artifacts: list[dict[str, Any]] = []
     units: list[_HierarchyUnit] = []
@@ -478,10 +587,46 @@ def _render_encapsulated(
             for edge in edges
             if edge.tail in included and edge.head in included
         ]
+        # Every cut edge appears in both incident panels, with its real endpoint
+        # names, original label, direction and a link to the other panel.
+        cut_edges = [e for e in edges if (e.tail in included) != (e.head in included)]
+        remote_groups = sorted({owner[e.head if e.tail in included else e.tail] for e in cut_edges})
+        buckets = [[g] for g in remote_groups[:4]]
+        if len(remote_groups) > 4:
+            buckets.append(remote_groups[4:])
+        portals = {}
+        for index, bucket in enumerate(buckets):
+            portal = f"__boundary_{index}"
+            while portal in {name for name, _ in node_specs}:
+                portal += "_"
+            remote_nodes = sorted({e.head if e.tail in included else e.tail for e in cut_edges
+                                   if owner[e.head if e.tail in included else e.tail] in bucket})
+            target = (output.with_name(f"{output.stem}.inner-{bucket[0]:03d}.{format}")
+                      if len(bucket) == 1 else output)
+            node_specs.append((portal, {
+                "label": "External: " + _summary([_node_label(node_by_index[i]) for i in remote_nodes]),
+                "shape": "box", "style": "dashed", "color": "#64748b",
+                "URL": target.name, "target": "_top", "tooltip": "Open connected panel or overview",
+            }))
+            for group in bucket:
+                portals[group] = portal
+        boundary_connections = []
+        for edge in cut_edges:
+            remote = edge.head if edge.tail in included else edge.tail
+            tail, head = node_by_index[edge.tail], node_by_index[edge.head]
+            attributes = dict(edge.attributes)
+            detail = f"{_node_label(tail)} → {_node_label(head)}" if layout["directed"] else f"{_node_label(tail)} — {_node_label(head)}"
+            attributes["label"] = detail + ("\n" + str(attributes["label"]) if attributes.get("label") else "")
+            edge_specs.append((tail.name if edge.tail in included else portals[owner[remote]],
+                               head.name if edge.head in included else portals[owner[remote]], attributes))
+            boundary_connections.append({"tail": tail.name, "head": head.name,
+                                         "label": edge.attributes.get("label", ""),
+                                         "panel": f"inner_{owner[remote]:03d}"})
+        panel_label = _panel_label(group_nodes)
         rows, columns = _write_fixed_grid_dot(
             source_path,
             key,
-            f"{dot.stem}: inner view {number}",
+            f"{dot.stem}: {panel_label}",
             node_specs,
             edge_specs,
             directed=layout["directed"],
@@ -491,8 +636,7 @@ def _render_encapsulated(
             return rendered
         unit = _HierarchyUnit(
             key=key,
-            label=f"Inner view {number}\n{len(group_nodes)} node"
-            + ("s" if len(group_nodes) != 1 else ""),
+            label=panel_label,
             node_indexes=included,
             output_path=output_path,
         )
@@ -505,7 +649,10 @@ def _render_encapsulated(
                 "project_relative_output_path": output_path.relative_to(root).as_posix(),
                 "rows": rows,
                 "columns": columns,
-                "node_count": len(group_nodes),
+                "node_count": len(node_specs),
+                "label": panel_label,
+                "owned_nodes": [node.name for node in group_nodes],
+                "boundary_connections": boundary_connections,
             }
         )
 
@@ -519,7 +666,7 @@ def _render_encapsulated(
             output_path = output.with_name(
                 f"{output.stem}.group-{level}-{number:03d}.{format}"
             )
-            node_specs, edge_specs = _overview_specs(children, edges)
+            node_specs, edge_specs = _overview_specs(children, edges, node_by_index, directed=layout["directed"])
             rows, columns = _write_fixed_grid_dot(
                 source_path,
                 key,
@@ -534,7 +681,7 @@ def _render_encapsulated(
             included = frozenset().union(*(child.node_indexes for child in children))
             unit = _HierarchyUnit(
                 key=key,
-                label=f"Group {level}.{number}\n{len(included)} nodes",
+                label=_summary([child.label for child in children]),
                 node_indexes=included,
                 output_path=output_path,
             )
@@ -554,7 +701,7 @@ def _render_encapsulated(
         level += 1
 
     parent_source = dot.with_name(f"{dot.stem}.parent.dot")
-    node_specs, edge_specs = _overview_specs(units, edges)
+    node_specs, edge_specs = _overview_specs(units, edges, node_by_index, directed=layout["directed"])
     parent_rows, parent_columns = _write_fixed_grid_dot(
         parent_source,
         f"{dot.stem}_parent",
@@ -596,6 +743,7 @@ def _render_encapsulated(
             "max_columns": MAX_LAYOUT_COLUMNS,
             "max_nodes": MAX_LAYOUT_NODES,
             "layout_compliant": True,
+            "requires_bounded_layout": False,
             "requires_encapsulation": False,
         },
         "artifacts": artifacts,
@@ -636,7 +784,7 @@ def graphviz_environment_impl() -> dict[str, Any]:
         "maximum_layout_rows": MAX_LAYOUT_ROWS,
         "maximum_layout_columns": MAX_LAYOUT_COLUMNS,
         "maximum_nodes_per_image": MAX_LAYOUT_NODES,
-        "oversized_layout_behavior": "render parent and inner encapsulated graph images",
+        "oversized_layout_behavior": "reflow small graphs; partition larger graphs by semantics/connectivity with boundary context",
         "stderr": _diagnostics(result.stderr),
     }
 
@@ -687,6 +835,8 @@ def graphviz_render_impl(
         if not layout["success"]:
             return layout
         if not layout["layout_compliant"]:
+            if layout["node_count"] <= MAX_LAYOUT_NODES:
+                return _render_bounded(root, dot, output, format, engine, layout)
             return _render_encapsulated(root, dot, output, format, engine, layout)
         output.parent.mkdir(parents=True, exist_ok=True)
         executable = _engine_executable(engine)
@@ -818,6 +968,13 @@ def graphviz_publish_markdown_impl(
         marker = dot.relative_to(root).as_posix()
         relative_image = os.path.relpath(output, markdown.parent).replace(os.sep, "/")
         block = _markdown_block(marker, relative_image, alt_text or "GraphViz diagram")
+        panels = []
+        for number, artifact in enumerate((a for a in rendered["artifacts"] if a["kind"] == "inner"), start=1):
+            relative = os.path.relpath(artifact["output_path"], markdown.parent).replace(os.sep, "/")
+            panels.append(f"\n\n![Detail panel {number}]({relative})")
+        if panels:
+            closing = f"\n<!-- /graphviz:{marker} -->"
+            block = block.removesuffix(closing) + "".join(panels) + closing
         original = markdown.read_text(encoding="utf-8")
         updated, existing = _replace_or_insert_block(original, marker, block, anchor)
         if updated != original:
@@ -856,7 +1013,7 @@ def graphviz_environment() -> dict[str, Any]:
 
 @mcp.tool(annotations=READ_ONLY)
 def graphviz_validate(project_dir: str, dot_path: str) -> dict[str, Any]:
-    """Validate DOT and report whether its computed layout needs 5x5 encapsulation."""
+    """Validate DOT; report whether it needs bounded reflow or semantic parcelization."""
     return graphviz_validate_impl(project_dir, dot_path)
 
 
@@ -868,7 +1025,7 @@ def graphviz_render(
     format: str = "svg",
     engine: str = "dot",
 ) -> dict[str, Any]:
-    """Render DOT, automatically creating parent/inner images above the 5x5 limit."""
+    """Render DOT; reflow small graphs or create meaningful panels with boundary context."""
     return graphviz_render_impl(project_dir, dot_path, output_path, format, engine)
 
 
@@ -881,7 +1038,7 @@ def graphviz_render_source(
     format: str = "svg",
     engine: str = "dot",
 ) -> dict[str, Any]:
-    """Write DOT and render it with automatic parent/inner 5x5 encapsulation."""
+    """Write complete DOT, then render with bounded reflow or semantic detail panels."""
     return graphviz_render_source_impl(project_dir, dot_source, dot_path, output_path, format, engine)
 
 
@@ -895,7 +1052,7 @@ def graphviz_publish_markdown(
     alt_text: str = "GraphViz diagram",
     anchor: str = "",
 ) -> dict[str, Any]:
-    """Render a bounded diagram hierarchy and update its root Markdown reference."""
+    """Render bounded diagrams and embed the overview and detail panels in Markdown."""
     return graphviz_publish_markdown_impl(
         project_dir, dot_path, markdown_path, output_path, format, alt_text, anchor
     )
@@ -903,7 +1060,7 @@ def graphviz_publish_markdown(
 
 @mcp.tool(annotations=WRITE)
 def graphviz_sync(project_dir: str, dot_path: str, markdown_path: str = "") -> dict[str, Any]:
-    """Render a bounded diagram hierarchy and optionally refresh its root Markdown block."""
+    """Render bounded diagrams and optionally refresh overview/detail images in Markdown."""
     return graphviz_sync_impl(project_dir, dot_path, markdown_path)
 
 

@@ -218,9 +218,16 @@ RULE_TEXT = """\
 Use the GraphViz MCP tools for state machines, state-transition diagrams, flowcharts,
 directed dependency graphs, and architecture/data-flow diagrams. Treat a version-controlled
 `.dot` file as the source of truth and render SVG by default. Keep any single graph within
-five rows, five columns, and 25 nodes; the tools enforce this and encapsulate larger graphs
-into a linked parent/inner hierarchy. Do not create decorative diagrams or edit unrelated
-Markdown.
+five rows, five columns, and 25 nodes, including boundary context. Author the complete
+meaningful graph first; do not pre-split by coordinates or draw anonymous folder-to-folder
+overviews. Small oversized layouts are reflowed into one image; larger graphs are grouped
+by connectivity. Use labeled cluster subgraphs or node `mcp_group="Subsystem name"`
+attributes to express semantic boundaries. Every detail panel should explain a relationship
+with real node names, edge labels, and incoming/outgoing boundary endpoints. Inspect the
+returned `artifacts` and `boundary_connections`; revise grouping when a panel is unhelpful.
+Keep generated `.bounded.dot`, parent/inner `.dot` sources and images. Publish/sync embeds
+detail panels in Markdown, since links inside embedded SVGs may not be clickable.
+Do not create decorative diagrams or edit unrelated Markdown.
 
 ## Typical usage patterns
 
@@ -230,7 +237,7 @@ Markdown.
 - **Re-render an existing source:** call `graphviz_render` with `project_dir` and `dot_path`
   after editing the `.dot` file; choose `format` (`svg`/`png`/`pdf`) and `engine` as needed.
 - **Check before committing:** call `graphviz_validate` and inspect
-  `layout.requires_encapsulation` to see whether the graph exceeds the 5x5 / 25-node limit.
+  `layout.requires_bounded_layout` for reflow and `layout.requires_encapsulation` for splitting.
 - **Publish into Markdown:** call `graphviz_publish_markdown` with the target `markdown_path`
   and an optional `anchor` (an exact heading or line) to insert/refresh one managed image
   block. Repeated calls update the block in place rather than duplicating it.
@@ -244,6 +251,13 @@ Markdown.
 # duplicating on repeated runs.
 _AGENTS_BEGIN = "<!-- graphviz-mcp:begin -->"
 _AGENTS_END = "<!-- graphviz-mcp:end -->"
+
+# Exact pre-marker guidance emitted by the original installation. Only migrate
+# this known paragraph; user-written sections with the same heading are preserved.
+_LEGACY_AGENTS = """## GraphViz diagrams
+
+When a task involves a state machine, state flow, workflow, flowchart, directed dependency graph, architecture/data-flow graph, decision tree, pipeline, or similar graph-structured diagram, use the globally available `graphviz` MCP server. Prefer a version-controlled `.dot` file as the source of truth and render SVG for Markdown documentation. Never place more than five rows, five columns, or 25 nodes in one graph image. When the full graph exceeds that limit, use the tools' node encapsulation: keep a bounded parent overview and render each encapsulated inner view as its own graph image, recursively adding bounded overview levels when necessary. Preserve the generated parent/inner `.dot` sources and images. Use the GraphViz publish/sync tools when documentation should reference the diagram, update relevant diagrams when the underlying state/flow logic changes, and preserve project-specific overrides that explicitly require another diagram format.
+"""
 
 
 def _write_rule_file(path: Path) -> bool:
@@ -273,7 +287,11 @@ def _upsert_marked_section(path: Path, body: str) -> bool:
         re.DOTALL,
     )
     if marker.search(original):
-        rendered = marker.sub(section, original)
+        rendered = marker.sub(lambda _: section, original)
+        if body == RULE_TEXT:
+            rendered = rendered.replace(_LEGACY_AGENTS, "")
+    elif body == RULE_TEXT and _LEGACY_AGENTS in original:
+        rendered = original.replace(_LEGACY_AGENTS, section)
     elif original.strip():
         rendered = original.rstrip() + "\n\n" + section
     else:
@@ -303,8 +321,11 @@ launch the stdio server automatically; no daemon or open server workspace is req
 
 Treat a version-controlled `.dot` file as the source of truth and SVG as the default
 generated artifact (PNG for compatibility, PDF for publication). Any single graph is limited
-to five rows, five columns, and 25 nodes; larger graphs are automatically encapsulated into a
-linked parent/inner hierarchy whose generated `.dot` files are kept beside the source.
+to five rows, five columns, and 25 nodes including boundary endpoints. Small oversized
+layouts reflow into one image. Larger graphs use connectivity and labeled clusters or node
+`mcp_group` attributes to form meaningful detail panels. Panels preserve labeled boundary
+connections; the overview summarizes actual contents. Generated `.bounded.dot`, parent and
+inner `.dot` files stay beside the source. Publish/sync embeds detail panels in Markdown.
 
 ### Typical workflows
 
@@ -335,8 +356,9 @@ The managed image block is inserted once and updated in place on later calls:
 
 **Validate before committing**
 
-Call `graphviz_validate` and inspect `layout.requires_encapsulation` to confirm the graph
-fits within the enforced limits before rendering or publishing.
+Call `graphviz_validate`: `layout.requires_bounded_layout` signals reflow or splitting,
+and `layout.requires_encapsulation` signals a graph over 25 nodes. Inspect rendered panels
+and their `boundary_connections` to confirm the breakdown preserves the intended flow.
 
 ### Available tools
 

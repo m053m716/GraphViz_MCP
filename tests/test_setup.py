@@ -107,6 +107,30 @@ def test_upsert_marked_section_is_idempotent(tmp_path: Path) -> None:
     assert path.read_text(encoding="utf-8").count(setup._AGENTS_BEGIN) == 1
 
 
+@pytest.mark.parametrize("marked", [False, True])
+def test_migrate_known_legacy_guidance_without_duplicate_rules(tmp_path: Path, marked: bool) -> None:
+    path = tmp_path / "AGENTS.md"
+    original = setup._LEGACY_AGENTS + "\n## Local policy\nKeep this text.\n"
+    if marked:
+        original += setup._AGENTS_BEGIN + "\nOld managed guidance\n" + setup._AGENTS_END + "\n"
+    path.write_text(original, encoding="utf-8")
+    assert setup._upsert_agents_section(path)
+    text = path.read_text(encoding="utf-8")
+    assert text.count("# GraphViz diagrams") == 1
+    assert "mcp_group" in text and "boundary_connections" in text
+    assert "Keep this text." in text
+    assert setup._LEGACY_AGENTS not in text
+    assert not setup._upsert_agents_section(path)
+
+
+def test_custom_unmarked_guidance_is_preserved(tmp_path: Path) -> None:
+    path = tmp_path / "AGENTS.md"
+    original = "## GraphViz diagrams\n\nProject-specific custom rules.\n"
+    path.write_text(original, encoding="utf-8")
+    setup._upsert_agents_section(path)
+    assert path.read_text(encoding="utf-8").startswith(original)
+
+
 def test_vscode_main_writes_all_artifacts(tmp_path: Path) -> None:
     rc = setup.vscode_main([str(tmp_path)])
     assert rc == 0

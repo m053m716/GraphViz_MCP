@@ -130,7 +130,34 @@ graphviz-mcp-install --install-graphviz
 
 The initialization `instructions` tell agents to use GraphViz for state machines, state transitions, flowcharts, directed dependency graphs, architecture/data-flow diagrams, decision flows, and similar graph-structured technical documentation. They also emphasize version-controlled `.dot` sources, SVG by default, managed Markdown references, repository conventions, and avoiding decorative or unrelated edits.
 
-Every graph image is limited to at most five visual rows, five visual columns, and therefore 25 nodes. The server inspects the coordinates computed by the selected GraphViz engine. If either dimension or the node capacity is exceeded, it spatially partitions the source into bounded inner views and renders a parent overview with one encapsulation node per inner view. SVG overview nodes link to their inner SVG images. If an overview would itself exceed 5x5, the server recursively adds bounded intermediate overview images. The original `.dot` remains the source of truth, and generated `.parent.dot`, `.inner-NNN.dot`, and, when needed, `.group-L-NNN.dot` files make the rendered hierarchy reviewable.
+Every graph image is limited to five visual rows, five visual columns, and 25 nodes, including boundary context. For `dot`, rows/columns mean ranks and maximum rank occupancy (swapped for LR/RL); staggered nodes in different ranks do not count as extra columns. Other engines use coordinate bands. Small oversized layouts (at most 25 nodes) reflow into one bounded image with a `.bounded.dot` source, avoiding a needless folder overview.
+
+Larger graphs use deterministic connectivity grouping, preferring labeled cluster subgraphs or node `mcp_group` attributes as semantic boundaries. Each panel owns at most 20 nodes and reserves up to five boundary portals. Connected neighbours are preferred, followed by siblings sharing a neighbour; unrelated components are kept separate except for isolated nodes. This is a heuristic, not an inference of domain meaning: supply semantic groups and inspect the results. For example, `api [mcp_group="HTTP ingress"]` and `store [mcp_group="Persistence"]` give the tool meaningful subsystem boundaries. Small groups remain separate even when they could fit in a larger panel.
+
+Each crossing edge appears in both incident detail panels with real endpoint names, its original label/style/direction, and a portal to the connected panel. Portals aggregate remote endpoints by panel; when more than five destination panels are involved, four get individual portals and the rest share a portal linking to the overview. The manifest lists every crossing edge without truncation. Overview boxes summarize their actual contents and edge labels summarize their interactions (up to three distinct descriptions). SVG links open detail images. Overviews exceeding 25 nodes gain bounded intermediate levels. The original `.dot` remains the source of truth; derived `.parent.dot`, `.inner-NNN.dot`, and `.group-L-NNN.dot` sources remain reviewable beside it.
+
+## Updating an existing installation
+
+Restart the MCP client/server to load the changed implementation and tool descriptions. An editable installation or a client launching this checkout's `server.py` picks up Python changes on restart; a non-editable installation needs reinstalling. To refresh package metadata and console scripts as well, run from this repository:
+
+```powershell
+.venv\Scripts\python.exe -m pip install -e ".[test]"
+.venv\Scripts\graphviz-mcp-install.exe --skip-graphviz-check
+# Repeat for repositories with their own local guidance/configuration:
+.venv\Scripts\graphviz-mcp-vscode.exe C:\MyRepos\Python\dnd-scribe
+```
+
+The install command refreshes global Codex AGENTS.md and Claude rules; the vscode command refreshes project AGENTS.md, rules, README guidance, and MCP configuration. Both preserve unrelated content and create backups. They also migrate the exact known legacy unmarked GraphViz paragraph, preventing conflicting duplicate guidance. Customized unmarked paragraphs are preserved and should be reviewed manually. No GraphViz binary upgrade is needed for this change.
+
+Existing SVGs are not changed by installation. After restarting, call `graphviz_sync` on each original source (for example `docs/diagrams/http-boundary.dot`), with `markdown_path` when it has a managed documentation block. Do not use a generated `.inner-*.dot` as the source. Old generated files are not automatically deleted; the new `artifacts` manifest identifies the current output set so obsolete panels can be reviewed and removed separately.
+
+## Parcelization example
+
+<!-- graphviz:testdata/http-boundary.dot -->
+![HTTP boundary with all clients and endpoints connected](testdata/http-boundary.svg)
+<!-- /graphviz:testdata/http-boundary.dot -->
+
+The nine-node HTTP boundary regression now renders as one four-rank graph with at most four nodes per rank. Its service client and service health endpoint retain their connections rather than becoming an isolated two-node panel.
 
 ## MCP tools
 
@@ -147,7 +174,7 @@ project_dir: string
 dot_path: string
 ```
 
-Returns `success`, `dot_path`, `errors`, `warnings`, bounded `stderr`, and a `layout` object containing the computed row/column counts, limits, `layout_compliant`, and `requires_encapsulation`. The source must be an existing `.dot` file inside `project_dir`. An oversized but valid source still validates successfully because rendering can safely encapsulate it.
+Returns `success`, `dot_path`, `errors`, `warnings`, bounded `stderr`, and a `layout` object containing computed row/column counts, limits, `layout_compliant`, `requires_bounded_layout` (reflow or splitting), and `requires_encapsulation` (more than 25 nodes). The source must be an existing `.dot` file inside `project_dir`. An oversized but valid source still validates successfully.
 
 ### `graphviz_render`
 
@@ -161,7 +188,7 @@ format: svg | png | pdf (default svg)
 engine: dot | neato | fdp | sfdp | circo | twopi (default dot)
 ```
 
-If `output_path` is omitted, the root artifact is placed next to the source with the selected extension. A layout within 5x5 renders normally. An oversized layout automatically produces the bounded parent/inner hierarchy described above. The requested path always identifies the root parent image; related inner images use deterministic names beside it. The result includes `encapsulated`, the original and root layout summaries, and an `artifacts` manifest with every generated source/image pair and its row, column, and node counts. Encapsulated views use fixed positions through `neato` so GraphViz cannot expand them beyond the enforced grid.
+If `output_path` is omitted, the root artifact is placed next to the source with the selected extension. A layout within 5x5 renders normally. A small oversized layout returns `reflowed: true`, `encapsulated: false` and one `bounded` artifact. Larger graphs return `encapsulated: true` with the hierarchy described above. The requested output path always identifies the root image. The `artifacts` manifest includes every source/image pair and its row, column, and total node counts; inner artifacts also include a descriptive `label`, `owned_nodes`, and complete `boundary_connections` with original endpoint IDs, labels and destination panel keys. Derived views use fixed positions through `neato`, with spacing based on node dimensions and labels, so GraphViz cannot expand them beyond the enforced grid.
 
 ### `graphviz_render_source`
 
@@ -200,7 +227,7 @@ The managed block identifies the source and uses a correct relative image link:
 <!-- /graphviz:docs/diagrams/controller-state.dot -->
 ```
 
-Repeated calls update the block rather than duplicating it. An `anchor` inserts the block after the matching line. Without an anchor, the block is appended only when the Markdown location is unambiguous. For an encapsulated diagram, the managed block references the root parent image; its encapsulation nodes lead to the separately rendered inner images when the output format supports links.
+Repeated calls update the block rather than duplicating it. An `anchor` inserts the block after the matching line. Without an anchor, the block is appended. For an encapsulated diagram, the managed block embeds both the overview and every detail panel. Readers can see the actual relationships even when their Markdown viewer disables links inside SVG images or uses PNG.
 
 ### `graphviz_sync`
 
@@ -214,7 +241,7 @@ Write tools are marked with MCP write/idempotent annotations where supported; va
 
 ## Tests
 
-The fixtures include a labeled controller state machine (`Idle`, `Connecting`, `Connected`, `Fault`, `Retrying`), a decision flowchart with a diamond and branches, and a Markdown publish fixture. The suite covers executable/version detection, valid and invalid DOT, SVG/PNG rendering, the exact 5-column boundary, automatic encapsulation of over-wide and over-tall layouts, parent-to-inner SVG links, per-artifact limits, missing and unsafe paths, invalid formats/engines, cross-project operations, relative links, managed-block creation/idempotence, and an actual MCP client/server STDIO session.
+The fixtures include a controller state machine, decision flowchart, HTTP boundary regression and Markdown publishing. Tests cover small-graph reflow (SVG/PNG/PDF), semantic clusters and node grouping hints, labeled boundary edges, hub-and-spoke graphs, recursive overviews and portal overflow, per-artifact bounds, guidance migration, path validation, idempotent publishing, and an actual MCP client/server STDIO session.
 
 Run the complete suite:
 
@@ -247,7 +274,7 @@ Codex must be restarted or its MCP settings reloaded before the new server appea
 ```text
 1. Choose the target repository and its existing docs/figure convention.
 2. Create or update docs/diagrams/controller-state.dot without manually cramming more than 5x5 nodes into one view.
-3. Call graphviz_validate with the target project_dir and inspect `layout.requires_encapsulation`.
+3. Call graphviz_validate with the target project_dir and inspect `layout.requires_bounded_layout` and `layout.requires_encapsulation`.
 4. Call graphviz_publish_markdown with the relevant Markdown file; it creates parent/inner views when required.
 5. Review the source, generated hierarchy `.dot` files, and SVG artifacts in version control.
 ```
