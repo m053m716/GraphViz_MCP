@@ -77,6 +77,26 @@ def test_upsert_codex_toml_replaces_stale_and_preserves(tmp_path: Path) -> None:
     assert setup._upsert_codex_toml(path, entry, table_header="mcp_servers.graphviz") is False
 
 
+def test_upsert_codex_toml_preserves_legacy_multiline_inline_table(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[mcp_servers.mudra]\n'
+        'url = "https://mcp.example/mcp"\n'
+        'env_http_headers = {\n'
+        '  "X-Client" = "client"\n'
+        '  "X-Secret" = "secret"\n'
+        '}\n',
+        encoding="utf-8",
+    )
+
+    assert setup._upsert_codex_toml(
+        path, setup._server_entry(), table_header="mcp_servers.graphviz"
+    ) is True
+    text = path.read_text(encoding="utf-8")
+    assert 'env_http_headers = {\n' in text
+    assert "[mcp_servers.graphviz]" in text
+
+
 def test_strip_toml_table_keeps_dotted_subtable() -> None:
     text = (
         "[mcp_servers.graphviz]\n"
@@ -182,7 +202,7 @@ def test_install_command_install_vs_upgrade_differ_when_supported() -> None:
     if install is not None:
         assert isinstance(upgrade, list) and upgrade
         # winget/brew/dnf/apt use a distinct verb or flag for upgrades.
-        if install[0] in {"winget", "brew", "dnf"} or "apt-get" in install[0:2]:
+        if Path(install[0]).name in {"winget", "brew", "dnf"} or "apt-get" in install[0:2]:
             assert install != upgrade
 
 

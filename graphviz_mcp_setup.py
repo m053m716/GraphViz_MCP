@@ -183,8 +183,10 @@ def _strip_toml_table(text: str, header: str) -> str:
 def _upsert_codex_toml(path: Path, entry: dict[str, Any], *, table_header: str) -> bool:
     """Upsert ``[<table_header>]`` for GraphViz into a Codex ``config.toml``.
 
-    Existing TOML content, comments, and other servers are preserved. ``tomllib`` validates
-    the merged result. Returns ``True`` when the file changed on disk.
+    Existing TOML content, comments, and other servers are preserved. Valid existing TOML is
+    validated after the merge. Some Codex versions have emitted multiline inline tables that
+    Python's ``tomllib`` rejects; those legacy documents are preserved and updated with a
+    warning rather than making installation abort.
     """
     original = path.read_text(encoding="utf-8") if path.exists() else ""
 
@@ -195,8 +197,21 @@ def _upsert_codex_toml(path: Path, entry: dict[str, Any], *, table_header: str) 
     else:
         rendered = block
 
-    # Validate the merged document before writing anything.
-    tomllib.loads(rendered)
+    # Validate the merged document before writing anything when the existing
+    # document uses standard TOML. Older Codex config writers emitted
+    # multiline inline tables, which tomllib rejects even though Codex accepts
+    # them; do not discard or rewrite that user-owned configuration.
+    try:
+        tomllib.loads(original)
+    except tomllib.TOMLDecodeError as exc:
+        if not re.search(r"=\s*\{\s*\n", original):
+            raise
+        _log(
+            f"  warning: existing Codex config is not accepted by Python TOML validation "
+            f"({exc}); preserving it and adding [{table_header}]"
+        )
+    else:
+        tomllib.loads(rendered)
 
     if original == rendered:
         return False
@@ -483,8 +498,18 @@ def _install_command(upgrade: bool = False) -> list[str] | None:
         verb = "upgrade" if upgrade else "install"
         return ["winget", verb, "--id", "Graphviz.Graphviz", "-e",
                 "--accept-package-agreements", "--accept-source-agreements"]
-    if system == "Darwin" and shutil.which("brew"):
-        return ["brew", "upgrade", "graphviz"] if upgrade else ["brew", "install", "graphviz"]
+    if system == "Darwin":
+        # GUI-launched MCP clients do not always inherit the interactive
+        # shell's PATH. Homebrew uses one of these stable locations on Intel
+        # and Apple Silicon Macs, so find brew there as a fallback.
+        brew = shutil.which("brew")
+        if brew is None:
+            for candidate in (Path("/opt/homebrew/bin/brew"), Path("/usr/local/bin/brew")):
+                if candidate.is_file():
+                    brew = str(candidate)
+                    break
+        if brew:
+            return [brew, "upgrade", "graphviz"] if upgrade else [brew, "install", "graphviz"]
     if system == "Linux":
         if shutil.which("apt-get"):
             # apt-get install upgrades the package when a newer candidate is available.

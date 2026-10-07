@@ -408,7 +408,7 @@ def _validate_dot(root: Path, dot: Path) -> dict[str, Any]:
         return _failure("dot_path must refer to a .dot file", dot_path=str(dot))
     executable = _dot_executable()
     if executable is None:
-        return _failure("GraphViz dot.exe was not found on PATH")
+        return _failure("GraphViz dot executable was not found on PATH")
     try:
         result = _run_graphviz(executable, ["-Tdot", str(dot)])
     except subprocess.TimeoutExpired:
@@ -755,7 +755,7 @@ def graphviz_environment_impl() -> dict[str, Any]:
     executable = _dot_executable()
     if executable is None:
         return _failure(
-            "GraphViz dot.exe was not found on PATH",
+            "GraphViz dot executable was not found on PATH",
             dot_executable_path=None,
             graphviz_version=None,
             supported_output_formats=sorted(SUPPORTED_FORMATS),

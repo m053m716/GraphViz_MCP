@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import re
 from pathlib import Path
 
 import pytest
@@ -18,7 +19,10 @@ def test_environment_detection_and_version() -> None:
     assert result["success"] is True, result
     assert Path(result["dot_executable_path"]).is_file()
     assert "graphviz version" in result["graphviz_version"].lower()
-    assert "10.0.1" in result["graphviz_version"]
+    match = re.search(r"version\s+(\d+(?:\.\d+)*)", result["graphviz_version"], re.IGNORECASE)
+    assert match is not None
+    version = tuple(int(part) for part in match.group(1).split("."))
+    assert version >= (10, 0, 1)
     assert result["server_repository_path"] == str(ROOT.resolve())
     assert result["maximum_layout_rows"] == 5
     assert result["maximum_layout_columns"] == 5
