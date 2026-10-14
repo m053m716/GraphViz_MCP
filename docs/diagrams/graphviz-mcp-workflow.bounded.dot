@@ -1,0 +1,37 @@
+digraph "graphviz-mcp-workflow" {
+  graph [layout=neato, overlap=false, splines=true, labelloc=t, label="graphviz-mcp-workflow"];
+  "direct" [color="#1f2937", fillcolor="#dcfce7", fontname="Segoe UI", fontsize="10", height="0.55417", label="Standard GraphViz\nengine render", margin="0.16,0.10", pin="true", pos="0.0,0.0!", shape="box", style="rounded,filled", width="1.4658"];
+  "publish" [color="#1f2937", fillcolor="#fce7f3", fontname="Segoe UI", fontsize="10", height="0.55417", label="graphviz_publish_markdown()\nmanaged relative image block", margin="0.16,0.10", pin="true", pos="311.5,0.0!", shape="box", style="rounded,filled", width="2.1533"];
+  "readme" [color="#1f2937", fillcolor="#fce7f3", fontname="Segoe UI", fontsize="10", height="0.55417", label="README.md\nGitHub-rendered diagram", margin="0.16,0.10", pin="true", pos="623.0,0.0!", shape="note", style="rounded,filled", width="1.9033"];
+  "client" [color="#1f2937", fillcolor="#dbeafe", fontname="Segoe UI", fontsize="10", height="0.78371", label="MCP client\nconnects over STDIO", margin="0.16,0.10", pin="true", pos="934.5,0.0!", shape="oval", style="rounded,filled", width="2.235"];
+  "server" [color="#1f2937", fillcolor="#e0f2fe", fontname="Segoe UI", fontsize="10", height="0.55417", label="FastMCP(\"graphviz\",\nicons=_mcp_icons())", margin="0.16,0.10", pin="true", pos="1246.0,0.0!", shape="box", style="rounded,filled", width="1.5387"];
+  "handshake" [color="#1f2937", fillcolor="#e0f2fe", fontname="Segoe UI", fontsize="10", height="0.73125", label="initialize handshake\nserver name + instructions\n96x96 PNG data URI", margin="0.16,0.10", pin="true", pos="1246.0,-139.7976!", shape="box", style="rounded,filled", width="1.9346"];
+  "request" [color="#1f2937", fillcolor="#dbeafe", fontname="Segoe UI", fontsize="10", height="0.55417", label="Agent requests\na technical diagram", margin="0.16,0.10", pin="true", pos="934.5,-139.7976!", shape="box", style="rounded,filled", width="1.5075"];
+  "source" [color="#1f2937", fillcolor="#dbeafe", fontname="Segoe UI", fontsize="10", height="0.55417", label="Complete .dot source\n(existing or authored)", margin="0.16,0.10", pin="true", pos="623.0,-139.7976!", shape="box", style="rounded,filled", width="1.6325"];
+  "entry" [color="#1f2937", fillcolor="#e0f2fe", fontname="Segoe UI", fontsize="10", height="0.73125", label="MCP entry points\ngraphviz_validate()\ngraphviz_render_source()", margin="0.16,0.10", pin="true", pos="311.5,-139.7976!", shape="box", style="rounded,filled", width="1.8408"];
+  "render" [color="#1f2937", fillcolor="#e0f2fe", fontname="Segoe UI", fontsize="10", height="0.73125", label="Shared render path\ngraphviz_render() / graphviz_sync()\ngraphviz_render_impl()", margin="0.16,0.10", pin="true", pos="0.0,-139.7976!", shape="box", style="rounded,filled", width="2.4346"];
+  "bounds" [color="#1f2937", fillcolor="#fef3c7", fontname="Segoe UI", fontsize="10", height="1.1083", label="Within 5 rows,\n5 columns, 25 nodes?", margin="0.16,0.10", pin="true", pos="0.0,-279.5952!", shape="diamond", style="rounded,filled", width="3.265"];
+  "reflow" [color="#1f2937", fillcolor="#dcfce7", fontname="Segoe UI", fontsize="10", height="0.55417", label="_render_bounded()\nreflow small oversized graph", margin="0.16,0.10", pin="true", pos="311.5,-279.5952!", shape="box", style="rounded,filled", width="2.0804"];
+  "artifacts" [color="#1f2937", fillcolor="#f3e8ff", fontname="Segoe UI", fontsize="10", height="0.55417", label="Write SVG + DOT artifacts\n(parent/inner sources when needed)", margin="0.16,0.10", pin="true", pos="623.0,-279.5952!", shape="folder", style="rounded,filled", width="2.5179"];
+  "docs" [color="#1f2937", fillcolor="#fef3c7", fontname="Segoe UI", fontsize="10", height="1.1083", label="Markdown\nrequested?", margin="0.16,0.10", pin="true", pos="934.5,-279.5952!", shape="diamond", style="rounded,filled", width="1.9942"];
+  "done" [color="#1f2937", fillcolor="#dcfce7", fontname="Segoe UI", fontsize="10", height="0.53328", label="Done", margin="0.16,0.10", pin="true", pos="1246.0,-279.5952!", shape="oval", style="rounded,filled", width="0.90922"];
+  "parcel" [color="#1f2937", fillcolor="#dcfce7", fontname="Segoe UI", fontsize="10", height="0.55417", label="_render_encapsulated()\npartition with boundary context", margin="0.16,0.10", pin="true", pos="1246.0,-419.39279999999997!", shape="box", style="rounded,filled", width="2.2158"];
+  "client" -> "server" [color="#475569", fontname="Segoe UI", fontsize="9"];
+  "server" -> "handshake" [color="#475569", fontname="Segoe UI", fontsize="9"];
+  "handshake" -> "request" [color="#475569", fontname="Segoe UI", fontsize="9"];
+  "request" -> "source" [color="#475569", fontname="Segoe UI", fontsize="9"];
+  "source" -> "entry" [color="#475569", fontname="Segoe UI", fontsize="9"];
+  "entry" -> "render" [color="#475569", fontname="Segoe UI", fontsize="9"];
+  "render" -> "bounds" [color="#475569", fontname="Segoe UI", fontsize="9"];
+  "bounds" -> "direct" [color="#475569", fontname="Segoe UI", fontsize="9", label="yes"];
+  "bounds" -> "reflow" [color="#475569", fontname="Segoe UI", fontsize="9", label="small oversized"];
+  "bounds" -> "parcel" [color="#475569", fontname="Segoe UI", fontsize="9", label="over 25 nodes"];
+  "direct" -> "artifacts" [color="#475569", fontname="Segoe UI", fontsize="9"];
+  "reflow" -> "artifacts" [color="#475569", fontname="Segoe UI", fontsize="9"];
+  "parcel" -> "artifacts" [color="#475569", fontname="Segoe UI", fontsize="9"];
+  "artifacts" -> "docs" [color="#475569", fontname="Segoe UI", fontsize="9"];
+  "docs" -> "publish" [color="#475569", fontname="Segoe UI", fontsize="9", label="yes"];
+  "docs" -> "done" [color="#475569", fontname="Segoe UI", fontsize="9", label="no"];
+  "publish" -> "readme" [color="#475569", fontname="Segoe UI", fontsize="9"];
+  "readme" -> "done" [color="#475569", fontname="Segoe UI", fontsize="9"];
+}

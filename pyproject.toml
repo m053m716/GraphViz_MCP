@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "graphviz-mcp"
-version = "1.0.0"
+version = "1.1.0"
 description = "Local stdio MCP server for safe GraphViz rendering and Markdown publishing"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -32,6 +32,6 @@ py-modules = ["server", "graphviz_mcp_setup"]
 [tool.setuptools.data-files]
 "share/graphviz-mcp/skill" = ["skills/graphviz-mcp/SKILL.md"]
 "share/graphviz-mcp/skill/agents" = ["skills/graphviz-mcp/agents/openai.yaml"]
-"share/graphviz-mcp/skill/assets" = ["skills/graphviz-mcp/assets/graphviz-mcp.png"]
+"share/graphviz-mcp/skill/assets" = ["skills/graphviz-mcp/assets/graphviz-mcp.png", "skills/graphviz-mcp/assets/graphviz-mcp-96.png"]
 "share/graphviz-mcp/agent-skills/muse" = [".agents/skills/graphviz-mcp/SKILL.md"]
 "share/graphviz-mcp/agent-skills/claude" = [".claude/skills/graphviz-mcp/SKILL.md"]

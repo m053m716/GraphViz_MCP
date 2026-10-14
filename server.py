@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import os
+import base64
 import json
 import re
 import shutil
 import subprocess
+import sys
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
-from mcp.types import ToolAnnotations
+from mcp.types import Icon, ToolAnnotations
 
 
 SERVER_ROOT = Path(__file__).resolve().parent
@@ -34,6 +36,32 @@ Never put more than five rows or five columns of nodes, or more than 25 nodes to
 
 All filesystem-writing tools require an explicit project directory (or CLAUDE_PROJECT_DIR when the argument is intentionally empty), keep paths inside that project, and use the GraphViz executable discovered from PATH. The server is stdio-only and never starts a daemon.
 """
+
+
+def _mcp_icons() -> list[Icon]:
+    """Advertise the packaged tool icon as a client-readable data URI.
+
+    The source checkout keeps the icon beside the skill package. A wheel installs data files
+    under ``sys.prefix/share``, so support both layouts without requiring MCP clients to
+    resolve a local filesystem path.
+    """
+    candidates = (
+        SERVER_ROOT / "skills" / "graphviz-mcp" / "assets" / "graphviz-mcp-96.png",
+        Path(sys.prefix) / "share" / "graphviz-mcp" / "skill" / "assets" / "graphviz-mcp-96.png",
+    )
+    for path in candidates:
+        try:
+            encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+        except OSError:
+            continue
+        return [
+            Icon(
+                src=f"data:image/png;base64,{encoded}",
+                mimeType="image/png",
+                sizes=["96x96"],
+            )
+        ]
+    return []
 
 
 @dataclass(frozen=True)
@@ -1002,7 +1030,7 @@ def graphviz_sync_impl(project_dir: str, dot_path: str, markdown_path: str = "")
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False)
 WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True)
 
-mcp = FastMCP("graphviz", instructions=INSTRUCTIONS)
+mcp = FastMCP("graphviz", instructions=INSTRUCTIONS, icons=_mcp_icons())
 
 
 @mcp.tool(annotations=READ_ONLY)

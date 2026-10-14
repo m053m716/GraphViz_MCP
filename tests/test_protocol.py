@@ -22,6 +22,10 @@ async def _protocol_smoke() -> None:
         async with ClientSession(read, write) as session:
             initialized = await session.initialize()
             assert initialized.serverInfo.name == "graphviz"
+            assert initialized.serverInfo.icons
+            assert initialized.serverInfo.icons[0].mimeType == "image/png"
+            assert initialized.serverInfo.icons[0].sizes == ["96x96"]
+            assert initialized.serverInfo.icons[0].src.startswith("data:image/png;base64,")
             assert initialized.instructions.startswith("Use GraphViz for state machines")
             assert "Never put more than five rows or five columns" in initialized.instructions
             tools = await session.list_tools()

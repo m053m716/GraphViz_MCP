@@ -4,6 +4,9 @@ GraphViz MCP is a local, cross-platform Model Context Protocol server for creati
 
 ## Architecture
 
+<!-- graphviz:docs/diagrams/graphviz-mcp-workflow.dot -->
+![GraphViz MCP workflow from the icon handshake through bounded rendering to a GitHub README image](docs/diagrams/graphviz-mcp-workflow.svg)
+<!-- /graphviz:docs/diagrams/graphviz-mcp-workflow.dot -->
 ```text
 Claude Code / Codex VS Code extension
         | STDIO MCP
@@ -15,6 +18,10 @@ GraphViz -> .dot source + bounded parent/inner .svg/.png/.pdf artifacts
 ```
 
 The target repository is always supplied as `project_dir`; it does not have to be this server repository. A `.dot` file is the editable source of truth. SVG is the default documentation artifact, PNG is available for compatibility, and PDF is available for publication workflows.
+
+The stdio initialization handshake advertises the packaged 96×96 PNG icon as a data URI, so
+MCP clients that support server `icons` metadata can show the GraphViz icon without resolving
+a local filesystem path.
 
 ## Prerequisites and GraphViz discovery
 
@@ -191,7 +198,8 @@ The nine-node HTTP boundary regression now renders as one four-rank graph with a
 The repository includes a packaged Agent skill at `skills/graphviz-mcp/`. Its `SKILL.md`
 routes graph-structured diagram tasks to the six `graphviz` MCP tools, while
 `agents/openai.yaml` associates the skill with the stdio MCP dependency and the shared
-`assets/graphviz-mcp.png` icon. The skill files are included in built distributions under
+`assets/graphviz-mcp.png` icon. The MCP server also advertises `assets/graphviz-mcp-96.png`
+through its initialization metadata. The skill files are included in built distributions under
 `share/graphviz-mcp/skill/`.
 
 For project-local agent discovery, synchronized copies are also committed at
