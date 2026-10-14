@@ -1,0 +1,17 @@
+interface:
+  display_name: "GraphViz MCP"
+  short_description: "Render bounded GraphViz diagrams from DOT sources"
+  icon_small: "./assets/graphviz-mcp.png"
+  icon_large: "./assets/graphviz-mcp.png"
+  brand_color: "#12B8B0"
+  default_prompt: "Use $graphviz-mcp to render a maintainable GraphViz diagram from a DOT source."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "graphviz"
+      description: "GraphViz MCP server for DOT validation, bounded rendering, and Markdown publishing"
+      transport: "stdio"
+
+policy:
+  allow_implicit_invocation: true

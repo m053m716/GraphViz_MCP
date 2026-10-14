@@ -161,6 +161,19 @@ The nine-node HTTP boundary regression now renders as one four-rank graph with a
 
 ## MCP tools
 
+### Agent skill package
+
+The repository includes a packaged Agent skill at `skills/graphviz-mcp/`. Its `SKILL.md`
+routes graph-structured diagram tasks to the six `graphviz` MCP tools, while
+`agents/openai.yaml` associates the skill with the stdio MCP dependency and the shared
+`assets/graphviz-mcp.png` icon. The skill files are included in built distributions under
+`share/graphviz-mcp/skill/`.
+
+For project-local agent discovery, synchronized copies are also committed at
+`.agents/skills/graphviz-mcp/SKILL.md` (Muse and other cross-agent tools) and
+`.claude/skills/graphviz-mcp/SKILL.md` (Claude Code). Keep these copies identical to the
+canonical `skills/graphviz-mcp/SKILL.md` when updating the skill.
+
 ### `graphviz_environment`
 
 Read-only; no arguments. Reports the actual `dot.exe` path, GraphViz version, supported formats, available engine paths, server working directory, server repository path, enforced row/column/node limits, and oversized-layout behavior.

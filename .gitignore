@@ -15,3 +15,11 @@ __pycache__/
 .codex
 .claude
 .mcp.json
+
+# The project skill is intentionally shared with Claude Code; keep other .claude state local.
+!.claude/
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/graphviz-mcp/
+!.claude/skills/graphviz-mcp/SKILL.md
