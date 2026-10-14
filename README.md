@@ -1,6 +1,6 @@
 # GraphViz MCP
 
-GraphViz MCP is a local, Windows-friendly Model Context Protocol server for creating maintainable technical diagrams. It exposes GraphViz over STDIO, so Claude Code and Codex launch a short-lived server process automatically for each client session. No terminal process, HTTP daemon, Windows service, or open GraphViz_MCP workspace is required.
+GraphViz MCP is a local, cross-platform Model Context Protocol server for creating maintainable technical diagrams. It exposes GraphViz over STDIO, so Claude Code and Codex launch a short-lived server process automatically for each client session. No terminal process, HTTP daemon, operating-system service, or open GraphViz_MCP workspace is required.
 
 ## Architecture
 
@@ -26,15 +26,33 @@ where.exe dot
 dot -V
 ```
 
-The verified executable is `C:\Program Files\Graphviz\bin\dot.exe`, GraphViz `10.0.1 (20240210.2158)`. The `graphviz_environment` tool performs the same discovery at runtime and reports the absolute executable path and version. The server never installs or selects another GraphViz distribution. An optional `GRAPHVIZ_DOT` environment variable can point to a specific absolute executable when a client needs an explicit override.
+The verified Windows executable is `C:\Program Files\Graphviz\bin\dot.exe`, GraphViz `10.0.1 (20240210.2158)`. The `graphviz_environment` tool performs the same discovery at runtime and reports the absolute executable path and version. The server never installs or selects another GraphViz distribution. An optional `GRAPHVIZ_DOT` environment variable can point to a specific absolute executable when a client needs an explicit override.
+
+### macOS
+
+Install GraphViz with Homebrew, then verify that `dot` is available:
+
+```bash
+brew install graphviz
+dot -V
+```
+
+Homebrew installs are discovered from both the shell `PATH` and the standard Intel (`/usr/local/bin`) and Apple Silicon (`/opt/homebrew/bin`) locations. If a GUI-launched MCP client does not see Homebrew on `PATH`, set `GRAPHVIZ_DOT` to the absolute path printed by `command -v dot` in a terminal, or restart the client after installing Homebrew.
 
 ## Python setup and STDIO launch
 
-The isolated environment uses Python 3.12 and is located at `C:\MyRepos\Python\GraphViz_MCP\.venv`. To recreate it:
+The isolated environment uses Python 3.12 and is located at `C:\MyRepos\Python\GraphViz_MCP\.venv` on Windows. To recreate it:
 
 ```powershell
 py -3.12 -m venv .venv
 .venv\Scripts\python.exe -m pip install -e ".[test]"
+```
+
+On macOS, use the POSIX virtual-environment path:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -e ".[test]"
 ```
 
 The MCP clients launch:
@@ -124,6 +142,13 @@ On POSIX shells the scripts are on `PATH` after `pip install -e .` (or use
 ```bash
 graphviz-mcp-vscode ./my-project
 graphviz-mcp-install --install-graphviz
+```
+
+The scripts can also be called explicitly on macOS:
+
+```bash
+.venv/bin/graphviz-mcp-vscode ./my-project
+.venv/bin/graphviz-mcp-install --install-graphviz
 ```
 
 ## Server instructions
